@@ -85,6 +85,8 @@
   .score-label{font-size:12px;color:var(--muted)}
   .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .tag{font-size:11px;font-weight:600;background:#fff;border:1px solid var(--grout);border-radius:999px;padding:3px 9px;color:var(--muted)}
+  .tag.warn{background:#FFF6DC;border-color:#F0DA9A;color:#8A6D1A}
+  .tag.unverified{background:#EEF2F3;border-color:#CFDADC;color:#5E7375}
   .empty{padding:22px 16px;text-align:center;color:var(--muted);font-size:14px;line-height:1.5}
   /* ---------- Modal ---------- */
   .overlay{
@@ -166,7 +168,10 @@
       <small>WHEN IT'S ALMOST AN EMERGENCY</small>
     </div>
   </div>
-  <button class="header-btn" id="refreshBtn">↻ Refresh</button>
+  <div style="display:flex;gap:8px">
+    <button class="header-btn" id="adminBtn" style="display:none">⚑ Admin</button>
+    <button class="header-btn" id="refreshBtn">↻ Refresh</button>
+  </div>
 </header>
 
 <div class="map-wrap">
@@ -214,18 +219,26 @@
   <div class="modal" id="detailModal"></div>
 </div>
 
+<!-- Admin: reported listings queue -->
+<div class="overlay" id="adminOverlay">
+  <div class="modal" id="adminModal"></div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 /* ================= State ================= */
 const STORE_KEY = 'nine2two-restrooms-v1';
-const DEFAULT_CENTER = [40.7128, -74.0060]; // fallback: NYC
+const DEFAULT_CENTER = [34.1016, -118.3267]; // fallback: Hollywood, LA (PRD §4.1)
+const FRESH_LIMIT_DAYS = 30;                 // "Needs a fresh check" threshold (PRD §4.4)
 let map, userPos = null, userMarker = null;
-let restrooms = [];        // [{id,name,lat,lng,tags,reviews:[{stars,note,ts}]}]
+let restrooms = [];        // [{id,name,lat,lng,tags,verified,source,createdAt,reviews:[{stars,note,ts}],reports:[{reason,ts,resolved}]}]
 let markers = {};
 let dropMode = false, pendingLatLng = null;
 let addStarsVal = 0;
+const ADMIN = new URLSearchParams(location.search).get('admin') === '1';
 const FEATURES = ['Free','Accessible ♿','Changing table','Gender neutral','Needs key/code','24 hours'];
+const REPORT_REASONS = ["Doesn't exist",'Closed permanently','Inappropriate content'];
 
 /* ================= Helpers ================= */
 const $ = id => document.getElementById(id);
@@ -252,14 +265,55 @@ function timeAgo(ts){
   const h=Math.floor(m/60); if(h<24) return h+'h ago';
   return Math.floor(h/24)+'d ago';
 }
+function lastRatedTs(r){ return r.reviews.length ? Math.max(...r.reviews.map(v=>v.ts)) : 0; }
+function freshnessLabel(r){
+  const ts=lastRatedTs(r); if(!ts) return 'never rated';
+  const days=(Date.now()-ts)/86400000;
+  return (days>=1 ? 'last rated ' : 'rated ')+timeAgo(ts);
+}
+function needsFreshCheck(r){
+  const ts=lastRatedTs(r);
+  return !ts || (Date.now()-ts) > FRESH_LIMIT_DAYS*86400000;
+}
+function openReports(r){ return (r.reports||[]).filter(x=>!x.resolved); }
 
 /* ================= Storage ================= */
+function migrate(r){
+  if(r.verified===undefined) r.verified = true;   // pre-PRD records were all user-created
+  if(!r.source) r.source = 'user';
+  if(!r.createdAt) r.createdAt = r.reviews.length ? r.reviews[0].ts : Date.now();
+  if(!r.reports) r.reports = [];
+  return r;
+}
 async function loadRestrooms(){
   try{
     const res = await window.storage.get(STORE_KEY, true);
-    restrooms = res ? JSON.parse(res.value) : [];
+    restrooms = res ? JSON.parse(res.value).map(migrate) : [];
   }catch(e){ restrooms = []; }
+  if(!restrooms.length) await seedFromRefuge();
   renderAll();
+}
+
+/* Seed unverified listings from Refuge Restrooms near Hollywood (PRD §4.5).
+   Fails silently — the app works fine starting from an empty map. */
+async function seedFromRefuge(){
+  try{
+    const url = `https://www.refugerestrooms.org/api/v1/restrooms/by_location?per_page=50&lat=${DEFAULT_CENTER[0]}&lng=${DEFAULT_CENTER[1]}`;
+    const resp = await fetch(url);
+    if(!resp.ok) return;
+    const data = await resp.json();
+    const seeded = data
+      .filter(d=>d.latitude && d.longitude && d.name)
+      .map(d=>({
+        id:'refuge'+d.id,
+        name:String(d.name).slice(0,60),
+        lat:+d.latitude, lng:+d.longitude,
+        tags:[d.accessible&&'Accessible ♿', d.unisex&&'Gender neutral', d.changing_table&&'Changing table'].filter(Boolean),
+        verified:false, source:'refuge',
+        createdAt:Date.now(), reviews:[], reports:[]
+      }));
+    if(seeded.length){ restrooms = seeded; await saveRestrooms(); }
+  }catch(e){ /* offline or CORS-blocked: start empty */ }
 }
 async function saveRestrooms(){
   try{
@@ -272,7 +326,7 @@ function initMap(){
   map = L.map('map', {zoomControl:false}).setView(DEFAULT_CENTER, 14);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors (ODbL) · Seed data: <a href="https://www.refugerestrooms.org">Refuge Restrooms</a>'
   }).addTo(map);
   map.on('click', e=>{
     if(!dropMode) return;
@@ -282,9 +336,9 @@ function initMap(){
     openAddModal();
   });
 }
-function pinIcon(a){
-  const bg = a>=4 ? '#2E9E5B' : a>=2.5 ? '#FFC531' : a>0 ? '#C94F3D' : '#8AA0A3';
-  const fg = (a>=2.5 && a<4) ? '#1C2B2D' : '#fff';
+function pinIcon(a, verified){
+  const bg = !verified ? '#8AA0A3' : a>=4 ? '#2E9E5B' : a>=2.5 ? '#FFC531' : a>0 ? '#C94F3D' : '#8AA0A3';
+  const fg = (verified && a>=2.5 && a<4) ? '#1C2B2D' : '#fff';
   return L.divIcon({
     className:'',
     html:`<div style="width:36px;height:36px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);
@@ -299,7 +353,7 @@ function renderMarkers(){
   Object.values(markers).forEach(m=>map.removeLayer(m));
   markers = {};
   restrooms.forEach(r=>{
-    const m = L.marker([r.lat,r.lng], {icon: pinIcon(avg(r))}).addTo(map);
+    const m = L.marker([r.lat,r.lng], {icon: pinIcon(avg(r), r.verified)}).addTo(map);
     m.on('click', ()=>openDetail(r.id));
     markers[r.id] = m;
   });
@@ -319,13 +373,16 @@ function renderList(){
   $('listTitle').textContent = userPos ? 'Nearby restrooms' : 'All restrooms';
   list.innerHTML = sorted.map(r=>{
     const a = avg(r);
+    const extraTags =
+      (!r.verified?'<span class="tag unverified">Unverified</span>':'') +
+      (needsFreshCheck(r)&&r.reviews.length?'<span class="tag warn">Needs a fresh check</span>':'');
     return `<div class="card" onclick="openDetail('${r.id}')">
       <div class="card-top"><h3>${esc(r.name)}</h3><span class="dist">${distLabel(r)}</span></div>
       <div class="score-row">
-        <span class="sparkle-badge" style="background:${scoreColor(a)};color:${scoreTextColor(a)}">✦ ${a?a.toFixed(1):'—'}</span>
-        <span class="score-label">${scoreWord(a)} · ${r.reviews.length} rating${r.reviews.length===1?'':'s'}</span>
+        <span class="sparkle-badge" style="background:${r.verified?scoreColor(a):'var(--muted)'};color:${r.verified?scoreTextColor(a):'#fff'}">✦ ${a?a.toFixed(1):'—'}</span>
+        <span class="score-label">${r.verified?scoreWord(a):'Unverified'} · ${r.reviews.length} rating${r.reviews.length===1?'':'s'} · ${freshnessLabel(r)}</span>
       </div>
-      ${r.tags.length?`<div class="tags">${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>`:''}
+      ${(r.tags.length||extraTags)?`<div class="tags">${extraTags}${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>`:''}
     </div>`;
   }).join('');
 }
@@ -381,7 +438,9 @@ $('saveRestroom').onclick=async ()=>{
   restrooms.push({
     id:'r'+Date.now()+Math.random().toString(36).slice(2,6),
     name, lat:pendingLatLng.lat, lng:pendingLatLng.lng, tags,
-    reviews:[{stars:addStarsVal, note, ts:Date.now()}]
+    verified:true, source:'user', createdAt:Date.now(),
+    reviews:[{stars:addStarsVal, note, ts:Date.now()}],
+    reports:[]
   });
   pendingLatLng=null;
   await saveRestrooms();
@@ -400,35 +459,76 @@ function openDetail(id){
       <div class="r-top"><span class="stars-inline">${starsStr(v.stars)}</span><span>${timeAgo(v.ts)}</span></div>
       ${v.note?`<p>${esc(v.note)}</p>`:''}
     </div>`).join('');
+  const subBits=[
+    r.verified?scoreWord(a):'Unverified',
+    `${r.reviews.length} rating${r.reviews.length===1?'':'s'}`,
+    freshnessLabel(r),
+    distLabel(r)?distLabel(r)+' away':''
+  ].filter(Boolean).join(' · ');
+  const extraTags =
+    (!r.verified?'<span class="tag unverified">Be the first to confirm ✔</span>':'') +
+    (needsFreshCheck(r)&&r.reviews.length?'<span class="tag warn">Needs a fresh check</span>':'');
   $('detailModal').innerHTML=`
     <div class="detail-head">
       <div>
         <h2>${esc(r.name)}</h2>
-        <p class="sub">${scoreWord(a)} · ${r.reviews.length} rating${r.reviews.length===1?'':'s'} ${distLabel(r)?'· '+distLabel(r)+' away':''}</p>
-        ${r.tags.length?`<div class="tags">${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>`:''}
+        <p class="sub">${subBits}</p>
+        ${(r.tags.length||extraTags)?`<div class="tags">${extraTags}${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>`:''}
       </div>
-      <div class="big-score" style="background:${scoreColor(a)};color:${scoreTextColor(a)}">
+      <div class="big-score" style="background:${r.verified?scoreColor(a):'var(--muted)'};color:${r.verified?scoreTextColor(a):'#fff'}">
         <span class="n">✦ ${a?a.toFixed(1):'—'}</span><span class="s">/ 5.0</span>
       </div>
     </div>
     <button class="btn nav" onclick="navigateTo(${r.lat},${r.lng})">🧭 Navigate there</button>
-    <label>Rate the condition now</label>
+    <label>Rate the condition now${r.verified?'':' — your rating verifies this listing'}</label>
     <div class="star-row" id="detailStars"></div>
     <textarea id="detailNote" placeholder="How is it right now? (optional)" maxlength="200" style="margin-top:8px"></textarea>
     <button class="btn primary" id="submitRating">Submit rating</button>
     <label style="margin-top:16px">Recent reports</label>
     <div class="reviews">${reviews || '<p class="sub">No reports yet.</p>'}</div>
+    <button class="btn ghost" id="reportBtn">⚑ Report listing</button>
+    <div class="chip-row" id="reportReasons" style="display:none;margin-top:10px"></div>
+    ${ADMIN?`<button class="btn ghost" id="adminRename" style="color:var(--deep-aqua)">✎ Edit name (admin)</button>
+    <button class="btn ghost" id="adminDelete" style="color:var(--danger);border-color:var(--danger)">🗑 Delete listing (admin)</button>`:''}
     <button class="btn ghost" onclick="closeDetail()">Close</button>`;
   detailStars=0;
   buildStarRow($('detailStars'), v=>detailStars=v);
   $('submitRating').onclick=async ()=>{
     if(!detailStars){ toast('Tap the stars first'); return; }
     r.reviews.push({stars:detailStars, note:$('detailNote').value.trim(), ts:Date.now()});
+    const flipped = !r.verified;
+    r.verified = true; // a community rating verifies an imported listing (PRD §4.5)
     await saveRestrooms();
     renderAll();
     openDetail(id);
-    toast('Rating posted ✦');
+    toast(flipped ? 'Rating posted — listing verified ✔' : 'Rating posted ✦');
   };
+  $('reportBtn').onclick=()=>{
+    const row=$('reportReasons');
+    if(row.style.display!=='none'){ row.style.display='none'; return; }
+    row.innerHTML=REPORT_REASONS.map((x,i)=>`<span class="chip" data-i="${i}">${x}</span>`).join('');
+    [...row.children].forEach(c=>c.onclick=async ()=>{
+      r.reports.push({reason:REPORT_REASONS[+c.dataset.i], ts:Date.now(), resolved:false});
+      await saveRestrooms();
+      row.style.display='none';
+      toast('Reported — thanks, we’ll take a look');
+    });
+    row.style.display='flex';
+  };
+  if(ADMIN){
+    $('adminRename').onclick=async ()=>{
+      const name=prompt('New name:', r.name);
+      if(name && name.trim()){ r.name=name.trim().slice(0,60); await saveRestrooms(); renderAll(); openDetail(id); }
+    };
+    $('adminDelete').onclick=async ()=>{
+      if(!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
+      restrooms=restrooms.filter(x=>x.id!==id);
+      await saveRestrooms();
+      renderAll();
+      closeDetail();
+      toast('Listing deleted');
+    };
+  }
   $('detailOverlay').classList.add('open');
 }
 function closeDetail(){ $('detailOverlay').classList.remove('open'); }
@@ -444,10 +544,43 @@ function navigateTo(lat,lng){
 }
 window.navigateTo=navigateTo;
 
+/* ================= Admin queue (PRD §4.7) ================= */
+function openAdmin(){
+  const flagged = restrooms.filter(r=>openReports(r).length);
+  $('adminModal').innerHTML=`
+    <h2>Reported listings</h2>
+    <p class="sub">${flagged.length?flagged.length+' listing'+(flagged.length===1?'':'s')+' with open reports.':'No open reports. 🎉'}</p>
+    <div class="reviews">${flagged.map(r=>`
+      <div class="review">
+        <div class="r-top"><span><b>${esc(r.name)}</b></span><span>${openReports(r).length} report${openReports(r).length===1?'':'s'}</span></div>
+        <p>${openReports(r).map(x=>esc(x.reason)+' · '+timeAgo(x.ts)).join('<br>')}</p>
+        <div class="chip-row" style="margin-top:8px">
+          <span class="chip" onclick="adminResolve('${r.id}')">✔ Resolve reports</span>
+          <span class="chip" onclick="adminDeleteListing('${r.id}')" style="color:var(--danger);border-color:var(--danger)">🗑 Delete listing</span>
+        </div>
+      </div>`).join('')}
+    </div>
+    <button class="btn ghost" onclick="document.getElementById('adminOverlay').classList.remove('open')">Close</button>`;
+  $('adminOverlay').classList.add('open');
+}
+async function adminResolve(id){
+  const r=restrooms.find(x=>x.id===id); if(!r) return;
+  r.reports.forEach(x=>x.resolved=true);
+  await saveRestrooms(); renderAll(); openAdmin();
+}
+async function adminDeleteListing(id){
+  const r=restrooms.find(x=>x.id===id); if(!r) return;
+  if(!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
+  restrooms=restrooms.filter(x=>x.id!==id);
+  await saveRestrooms(); renderAll(); openAdmin();
+}
+window.adminResolve=adminResolve; window.adminDeleteListing=adminDeleteListing;
+
 /* ================= Misc wiring ================= */
 $('locateBtn').onclick=()=>locateUser(true);
 $('refreshBtn').onclick=async ()=>{ await loadRestrooms(); toast('Refreshed'); };
-[$('addOverlay'),$('detailOverlay')].forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
+if(ADMIN){ $('adminBtn').style.display='block'; $('adminBtn').onclick=openAdmin; }
+[$('addOverlay'),$('detailOverlay'),$('adminOverlay')].forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
 /* ================= Boot ================= */
 initMap();
