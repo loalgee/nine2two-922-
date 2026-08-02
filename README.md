@@ -2,54 +2,48 @@
 
 **When it's almost an emergency.**
 
-A mobile-first, community-powered restroom finder — MVP v1.0 per the product
-PRD. Beachhead market: Hollywood / Los Angeles. Users drop pins on a map for
-public restrooms, rate their cleanliness (1–5 stars), tag features (free,
-accessible, changing table, gender neutral, key/code required, 24 hours), and
-leave condition reports so the next person knows what to expect.
+A mobile-first, community-powered restroom finder with a real shared backend
+(Supabase). MVP v1.0 per [`nine2two-PRD-v1.md`](nine2two-PRD-v1.md).
+Beachhead market: Hollywood / Los Angeles.
 
-## Features
+## Structure
 
-- 📍 **Interactive map** (Leaflet + OpenStreetMap) with color-coded score
-  pins, centered on your location or Hollywood as fallback
-- ➕ **Add a restroom** — tap the ＋ button, then tap the map to place it
-- ✦ **Cleanliness scores** — live average of community ratings, from
-  "Sparkling" to "Avoid"
-- 🕐 **Freshness display** — every listing shows how recently it was rated;
-  nothing in 30+ days earns a "Needs a fresh check" tag
-- ✔ **Verified vs. unverified** — user-created listings are verified; seed
-  data imported from [Refuge Restrooms](https://www.refugerestrooms.org)
-  renders gray as unverified until a community rating confirms it
-- 🗒️ **Condition reports** — timestamped notes on the current state
-- ⚑ **Report listing** — flag entries that don't exist, closed permanently,
-  or contain inappropriate content
-- 🧭 **One-tap navigation** — deep links into Apple Maps or Google Maps
-  walking directions
-- ◎ **Locate me** — sorts the list by distance from your position
+```
+index.html            App shell (PWA-ready)
+css/styles.css        "Porcelain and signage" design system (PRD §6)
+js/app.js             App logic — map, list, add/rate/report, admin
+js/config.js          ← paste your Supabase URL + anon key here
+supabase/schema.sql   Tables, Row Level Security, triggers, stats view
+vendor/               Pinned copies of Leaflet 1.9.4 + supabase-js 2.111.0
+                      (no CDN dependency; only map tiles load remotely)
+manifest.webmanifest  PWA manifest ("Add to Home Screen")
+SETUP.md              Step-by-step account setup + deploy walkthrough
+prototype.html        Original single-file prototype (reference only)
+```
 
-## Admin mode
+## Features (PRD §4)
 
-Open the app with `?admin=1` in the URL to get the moderation queue
-(⚑ Admin button in the header): review open reports, resolve them, and
-edit or delete any listing.
+- 📍 Full-screen map (Leaflet + OpenStreetMap) centered on you, or Hollywood
+  as fallback; teardrop pins color-coded by cleanliness with the score inside
+- ➕ Add a restroom: tap ＋ → tap the map → name, stars, feature tags, note
+- ✦ Live community cleanliness scores, "Sparkling" to "Avoid"
+- 🕐 Freshness on every listing; "Needs a fresh check" after 30 days
+- ✔ Verified vs. unverified: user posts are verified; imported Refuge
+  Restrooms listings are gray until a community rating confirms them
+- ⚑ Report listing (doesn't exist / closed / inappropriate) + admin
+  moderation queue with magic-link sign-in
+- 🧭 One-tap walking directions via Apple Maps or Google Maps
+- 👤 No account needed to browse or rate — sign-in exists only for the admin
+
+## Quick start
+
+1. Follow [`SETUP.md`](SETUP.md) — create a free Supabase project, run
+   `supabase/schema.sql`, paste your credentials into `js/config.js`.
+2. Serve the folder: `python3 -m http.server 8000` → http://localhost:8000
+3. Deploy free on GitHub Pages (SETUP.md step 8).
 
 ## Data attribution
 
 Map tiles and geodata © [OpenStreetMap](https://www.openstreetmap.org/copyright)
 contributors (ODbL). Seed restroom data from
 [Refuge Restrooms](https://www.refugerestrooms.org).
-
-## Running it
-
-The whole app is a single file: `index.html`.
-
-Restroom data is shared across all users via a `window.storage` key/value API
-(available when the app runs as a hosted artifact). Outside that environment,
-loading data fails gracefully and the app starts with an empty list.
-
-Open `index.html` in a browser, or serve it locally:
-
-```sh
-python3 -m http.server 8000
-# then visit http://localhost:8000
-```
