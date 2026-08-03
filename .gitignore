@@ -1,0 +1,9 @@
+# Env files — never commit. The anon key in js/config.js is public by design
+# (protected by Row Level Security), but .env may someday hold real secrets
+# like service_role, so it stays ignored as a rule.
+.env
+.env.*
+!.env.example
+
+node_modules/
+.DS_Store
