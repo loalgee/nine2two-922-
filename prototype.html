@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>nine2two — When It's Almost an Emergency</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root{
+    --porcelain:#F7F9FA;
+    --tile:#FFFFFF;
+    --grout:#E3E9EC;
+    --deep-aqua:#0E6E73;
+    --aqua-dark:#0A4F53;
+    --signal:#FFC531;
+    --ink:#1C2B2D;
+    --muted:#5E7375;
+    --danger:#C94F3D;
+    --ok:#2E9E5B;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--porcelain);color:var(--ink);
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  /* ---------- Header ---------- */
+  header{
+    background:var(--deep-aqua);color:#fff;
+    padding:12px 16px;display:flex;align-items:center;justify-content:space-between;
+    z-index:1200;box-shadow:0 2px 8px rgba(10,79,83,.25);
+  }
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .logo{
+    width:34px;height:34px;border-radius:10px;background:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:12px;
+    font-weight:800;color:var(--deep-aqua);letter-spacing:.2px;font-variant-numeric:tabular-nums;
+  }
+  .brand h1{font-size:17px;font-weight:800;letter-spacing:.3px}
+  .brand small{display:block;font-size:10.5px;font-weight:500;opacity:.85;letter-spacing:.4px}
+  .header-btn{
+    background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);
+    color:#fff;border-radius:10px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;
+  }
+  .header-btn:active{background:rgba(255,255,255,.3)}
+  /* ---------- Map ---------- */
+  .map-wrap{position:relative;flex:1;display:flex;min-height:0}
+  #map{flex:1;z-index:1}
+  .leaflet-container{font:inherit}
+  /* ---------- Floating action buttons ---------- */
+  .fab-stack{position:absolute;right:14px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:1150}
+  .fab{
+    width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;font-size:22px;
+    box-shadow:0 4px 14px rgba(28,43,45,.25);
+  }
+  .fab.add{background:var(--signal);color:var(--ink)}
+  .fab.locate{background:#fff;color:var(--deep-aqua)}
+  .fab:active{transform:scale(.94)}
+  /* ---------- Bottom sheet / list ---------- */
+  .sheet{
+    background:var(--tile);border-top:1px solid var(--grout);
+    border-radius:18px 18px 0 0;box-shadow:0 -4px 18px rgba(28,43,45,.08);
+    max-height:44%;display:flex;flex-direction:column;z-index:1100;
+  }
+  .sheet-handle{width:44px;height:4px;background:var(--grout);border-radius:2px;margin:8px auto 4px}
+  .sheet-title{padding:4px 16px 8px;font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.6px;text-transform:uppercase}
+  .list{overflow-y:auto;padding:0 12px 14px;display:flex;flex-direction:column;gap:10px}
+  .card{
+    background:var(--porcelain);border:1px solid var(--grout);border-radius:var(--radius);
+    padding:12px 14px;cursor:pointer;
+  }
+  .card:active{background:#EEF4F5}
+  .card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .card h3{font-size:15px;font-weight:700}
+  .card .dist{font-size:12px;color:var(--muted);white-space:nowrap;font-weight:600}
+  .score-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .sparkle-badge{
+    display:inline-flex;align-items:center;gap:4px;font-weight:800;font-size:13px;
+    padding:3px 9px;border-radius:999px;color:#fff;
+  }
+  .score-label{font-size:12px;color:var(--muted)}
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .tag{font-size:11px;font-weight:600;background:#fff;border:1px solid var(--grout);border-radius:999px;padding:3px 9px;color:var(--muted)}
+  .tag.warn{background:#FFF6DC;border-color:#F0DA9A;color:#8A6D1A}
+  .tag.unverified{background:#EEF2F3;border-color:#CFDADC;color:#5E7375}
+  .empty{padding:22px 16px;text-align:center;color:var(--muted);font-size:14px;line-height:1.5}
+  /* ---------- Modal ---------- */
+  .overlay{
+    position:fixed;inset:0;background:rgba(20,35,37,.55);z-index:2000;
+    display:none;align-items:flex-end;justify-content:center;
+  }
+  .overlay.open{display:flex}
+  .modal{
+    background:#fff;width:100%;max-width:520px;border-radius:20px 20px 0 0;
+    padding:18px 18px 26px;max-height:88vh;overflow-y:auto;
+  }
+  .modal h2{font-size:18px;font-weight:800;margin-bottom:2px}
+  .modal .sub{font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.45}
+  label{display:block;font-size:12.5px;font-weight:700;color:var(--muted);margin:12px 0 5px;letter-spacing:.3px}
+  input[type=text],textarea{
+    width:100%;border:1.5px solid var(--grout);border-radius:10px;padding:11px 12px;
+    font:inherit;font-size:15px;background:var(--porcelain);
+  }
+  input:focus,textarea:focus{outline:2px solid var(--deep-aqua);outline-offset:1px;border-color:var(--deep-aqua)}
+  textarea{resize:none;height:74px}
+  .star-row{display:flex;gap:6px;font-size:30px;cursor:pointer;user-select:none}
+  .star{color:#D6DEE0;transition:transform .08s}
+  .star.on{color:var(--signal)}
+  .star:active{transform:scale(1.15)}
+  .chip-row{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{
+    border:1.5px solid var(--grout);background:#fff;border-radius:999px;
+    padding:7px 13px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;
+  }
+  .chip.on{background:var(--deep-aqua);border-color:var(--deep-aqua);color:#fff}
+  .btn{
+    width:100%;border:none;border-radius:12px;padding:14px;font-size:15.5px;font-weight:700;
+    cursor:pointer;margin-top:16px;
+  }
+  .btn.primary{background:var(--deep-aqua);color:#fff}
+  .btn.primary:active{background:var(--aqua-dark)}
+  .btn.ghost{background:#fff;border:1.5px solid var(--grout);color:var(--muted);margin-top:8px}
+  .btn.nav{background:var(--signal);color:var(--ink)}
+  .btn:disabled{opacity:.5}
+  /* ---------- Detail view ---------- */
+  .detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .big-score{
+    min-width:64px;height:64px;border-radius:16px;color:#fff;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;font-weight:800;
+  }
+  .big-score .n{font-size:22px;line-height:1}
+  .big-score .s{font-size:10px;opacity:.9;margin-top:2px;letter-spacing:.5px}
+  .reviews{margin-top:14px;display:flex;flex-direction:column;gap:9px}
+  .review{background:var(--porcelain);border:1px solid var(--grout);border-radius:10px;padding:10px 12px}
+  .review .r-top{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);font-weight:600}
+  .review p{font-size:13.5px;margin-top:4px;line-height:1.4}
+  .stars-inline{color:var(--signal);letter-spacing:1px}
+  /* ---------- Toast & banner ---------- */
+  .toast{
+    position:fixed;top:64px;left:50%;transform:translateX(-50%);
+    background:var(--ink);color:#fff;padding:10px 18px;border-radius:999px;
+    font-size:13.5px;font-weight:600;z-index:3000;opacity:0;transition:opacity .25s;pointer-events:none;
+    max-width:88%;text-align:center;
+  }
+  .toast.show{opacity:1}
+  .drop-banner{
+    position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    background:var(--signal);color:var(--ink);font-weight:700;font-size:13.5px;
+    padding:10px 16px;border-radius:12px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,.2);
+    display:none;align-items:center;gap:10px;white-space:nowrap;
+  }
+  .drop-banner.show{display:flex}
+  .drop-banner button{border:none;background:var(--ink);color:#fff;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;font-size:12px}
+  @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true">922</div>
+    <div>
+      <h1>nine2two</h1>
+      <small>WHEN IT'S ALMOST AN EMERGENCY</small>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button class="header-btn" id="adminBtn" style="display:none">⚑ Admin</button>
+    <button class="header-btn" id="refreshBtn">↻ Refresh</button>
+  </div>
+</header>
+
+<div class="map-wrap">
+  <div id="map"></div>
+
+  <div class="drop-banner" id="dropBanner">
+    📍 Tap the map to place the restroom
+    <button id="cancelDrop">Cancel</button>
+  </div>
+
+  <div class="fab-stack">
+    <button class="fab locate" id="locateBtn" aria-label="Find my location" title="My location">◎</button>
+    <button class="fab add" id="addBtn" aria-label="Add a restroom" title="Add restroom">＋</button>
+  </div>
+</div>
+
+<div class="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title" id="listTitle">Nearby restrooms</div>
+  <div class="list" id="list">
+    <div class="empty">Loading restrooms…</div>
+  </div>
+</div>
+
+<!-- Add restroom modal -->
+<div class="overlay" id="addOverlay">
+  <div class="modal">
+    <h2>Add a restroom</h2>
+    <p class="sub">Help the next person out. Your post is shared with everyone using this app.</p>
+    <label for="rName">Name / location</label>
+    <input type="text" id="rName" placeholder="e.g. Central Library, 2nd floor" maxlength="60">
+    <label>Cleanliness right now</label>
+    <div class="star-row" id="addStars" role="radiogroup" aria-label="Cleanliness rating"></div>
+    <label>Features</label>
+    <div class="chip-row" id="addChips"></div>
+    <label for="rNote">Condition notes (optional)</label>
+    <textarea id="rNote" placeholder="Stocked, smells fine, one stall out of order…" maxlength="200"></textarea>
+    <button class="btn primary" id="saveRestroom">Post restroom</button>
+    <button class="btn ghost" id="closeAdd">Cancel</button>
+  </div>
+</div>
+
+<!-- Detail / rate modal -->
+<div class="overlay" id="detailOverlay">
+  <div class="modal" id="detailModal"></div>
+</div>
+
+<!-- Admin: reported listings queue -->
+<div class="overlay" id="adminOverlay">
+  <div class="modal" id="adminModal"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= State ================= */
+const STORE_KEY = 'nine2two-restrooms-v1';
+const DEFAULT_CENTER = [34.1016, -118.3267]; // fallback: Hollywood, LA (PRD §4.1)
+const FRESH_LIMIT_DAYS = 30;                 // "Needs a fresh check" threshold (PRD §4.4)
+let map, userPos = null, userMarker = null;
+let restrooms = [];        // [{id,name,lat,lng,tags,verified,source,createdAt,reviews:[{stars,note,ts}],reports:[{reason,ts,resolved}]}]
+let markers = {};
+let dropMode = false, pendingLatLng = null;
+let addStarsVal = 0;
+const ADMIN = new URLSearchParams(location.search).get('admin') === '1';
+const FEATURES = ['Free','Accessible ♿','Changing table','Gender neutral','Needs key/code','24 hours'];
+const REPORT_REASONS = ["Doesn't exist",'Closed permanently','Inappropriate content'];
+
+/* ================= Helpers ================= */
+const $ = id => document.getElementById(id);
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2600); }
+function avg(r){ return r.reviews.length ? r.reviews.reduce((s,x)=>s+x.stars,0)/r.reviews.length : 0; }
+function scoreColor(a){ return a>=4 ? 'var(--ok)' : a>=2.5 ? 'var(--signal)' : a>0 ? 'var(--danger)' : 'var(--muted)'; }
+function scoreTextColor(a){ return (a>=2.5 && a<4) ? 'var(--ink)' : '#fff'; }
+function scoreWord(a){ return a>=4.5?'Sparkling':a>=4?'Clean':a>=3?'Decent':a>=2?'Rough':a>0?'Avoid':'Unrated'; }
+function starsStr(n){ return '★'.repeat(Math.round(n)) + '☆'.repeat(5-Math.round(n)); }
+function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+function distKm(a,b){
+  const R=6371, dLat=(b[0]-a[0])*Math.PI/180, dLng=(b[1]-a[1])*Math.PI/180;
+  const h=Math.sin(dLat/2)**2 + Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function distLabel(r){
+  if(!userPos) return '';
+  const km = distKm(userPos,[r.lat,r.lng]);
+  return km<1 ? Math.round(km*1000)+' m' : km.toFixed(1)+' km';
+}
+function timeAgo(ts){
+  const m=Math.floor((Date.now()-ts)/60000);
+  if(m<1) return 'just now'; if(m<60) return m+'m ago';
+  const h=Math.floor(m/60); if(h<24) return h+'h ago';
+  return Math.floor(h/24)+'d ago';
+}
+function lastRatedTs(r){ return r.reviews.length ? Math.max(...r.reviews.map(v=>v.ts)) : 0; }
+function freshnessLabel(r){
+  const ts=lastRatedTs(r); if(!ts) return 'never rated';
+  const days=(Date.now()-ts)/86400000;
+  return (days>=1 ? 'last rated ' : 'rated ')+timeAgo(ts);
+}
+function needsFreshCheck(r){
+  const ts=lastRatedTs(r);
+  return !ts || (Date.now()-ts) > FRESH_LIMIT_DAYS*86400000;
+}
+function openReports(r){ return (r.reports||[]).filter(x=>!x.resolved); }
+
+/* ================= Storage ================= */
+function migrate(r){
+  if(r.verified===undefined) r.verified = true;   // pre-PRD records were all user-created
+  if(!r.source) r.source = 'user';
+  if(!r.createdAt) r.createdAt = r.reviews.length ? r.reviews[0].ts : Date.now();
+  if(!r.reports) r.reports = [];
+  return r;
+}
+async function loadRestrooms(){
+  try{
+    const res = await window.storage.get(STORE_KEY, true);
+    restrooms = res ? JSON.parse(res.value).map(migrate) : [];
+  }catch(e){ restrooms = []; }
+  if(!restrooms.length) await seedFromRefuge();
+  renderAll();
+}
+
+/* Seed unverified listings from Refuge Restrooms near Hollywood (PRD §4.5).
+   Fails silently — the app works fine starting from an empty map. */
+async function seedFromRefuge(){
+  try{
+    const url = `https://www.refugerestrooms.org/api/v1/restrooms/by_location?per_page=50&lat=${DEFAULT_CENTER[0]}&lng=${DEFAULT_CENTER[1]}`;
+    const resp = await fetch(url);
+    if(!resp.ok) return;
+    const data = await resp.json();
+    const seeded = data
+      .filter(d=>d.latitude && d.longitude && d.name)
+      .map(d=>({
+        id:'refuge'+d.id,
+        name:String(d.name).slice(0,60),
+        lat:+d.latitude, lng:+d.longitude,
+        tags:[d.accessible&&'Accessible ♿', d.unisex&&'Gender neutral', d.changing_table&&'Changing table'].filter(Boolean),
+        verified:false, source:'refuge',
+        createdAt:Date.now(), reviews:[], reports:[]
+      }));
+    if(seeded.length){ restrooms = seeded; await saveRestrooms(); }
+  }catch(e){ /* offline or CORS-blocked: start empty */ }
+}
+async function saveRestrooms(){
+  try{
+    await window.storage.set(STORE_KEY, JSON.stringify(restrooms), true);
+  }catch(e){ toast('Could not save — check your connection'); }
+}
+
+/* ================= Map ================= */
+function initMap(){
+  map = L.map('map', {zoomControl:false}).setView(DEFAULT_CENTER, 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors (ODbL) · Seed data: <a href="https://www.refugerestrooms.org">Refuge Restrooms</a>'
+  }).addTo(map);
+  map.on('click', e=>{
+    if(!dropMode) return;
+    pendingLatLng = e.latlng;
+    dropMode = false;
+    $('dropBanner').classList.remove('show');
+    openAddModal();
+  });
+}
+function pinIcon(a, verified){
+  const bg = !verified ? '#8AA0A3' : a>=4 ? '#2E9E5B' : a>=2.5 ? '#FFC531' : a>0 ? '#C94F3D' : '#8AA0A3';
+  const fg = (verified && a>=2.5 && a<4) ? '#1C2B2D' : '#fff';
+  return L.divIcon({
+    className:'',
+    html:`<div style="width:36px;height:36px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);
+      background:${bg};border:2.5px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.3);
+      display:flex;align-items:center;justify-content:center;">
+      <span style="transform:rotate(45deg);font-size:12px;font-weight:800;color:${fg};font-family:sans-serif;">
+      ${a?a.toFixed(1):'?'}</span></div>`,
+    iconSize:[36,36], iconAnchor:[18,34]
+  });
+}
+function renderMarkers(){
+  Object.values(markers).forEach(m=>map.removeLayer(m));
+  markers = {};
+  restrooms.forEach(r=>{
+    const m = L.marker([r.lat,r.lng], {icon: pinIcon(avg(r), r.verified)}).addTo(map);
+    m.on('click', ()=>openDetail(r.id));
+    markers[r.id] = m;
+  });
+}
+
+/* ================= List ================= */
+function renderList(){
+  const list = $('list');
+  if(!restrooms.length){
+    list.innerHTML = `<div class="empty">No restrooms posted yet in this community.<br><b>Tap ＋ to add the first one!</b></div>`;
+    return;
+  }
+  const sorted = [...restrooms].sort((a,b)=>{
+    if(userPos) return distKm(userPos,[a.lat,a.lng]) - distKm(userPos,[b.lat,b.lng]);
+    return avg(b)-avg(a);
+  });
+  $('listTitle').textContent = userPos ? 'Nearby restrooms' : 'All restrooms';
+  list.innerHTML = sorted.map(r=>{
+    const a = avg(r);
+    const extraTags =
+      (!r.verified?'<span class="tag unverified">Unverified</span>':'') +
+      (needsFreshCheck(r)&&r.reviews.length?'<span class="tag warn">Needs a fresh check</span>':'');
+    return `<div class="card" onclick="openDetail('${r.id}')">
+      <div class="card-top"><h3>${esc(r.name)}</h3><span class="dist">${distLabel(r)}</span></div>
+      <div class="score-row">
+        <span class="sparkle-badge" style="background:${r.verified?scoreColor(a):'var(--muted)'};color:${r.verified?scoreTextColor(a):'#fff'}">✦ ${a?a.toFixed(1):'—'}</span>
+        <span class="score-label">${r.verified?scoreWord(a):'Unverified'} · ${r.reviews.length} rating${r.reviews.length===1?'':'s'} · ${freshnessLabel(r)}</span>
+      </div>
+      ${(r.tags.length||extraTags)?`<div class="tags">${extraTags}${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>`:''}
+    </div>`;
+  }).join('');
+}
+function renderAll(){ renderMarkers(); renderList(); }
+
+/* ================= Geolocation ================= */
+function locateUser(fly=true){
+  if(!navigator.geolocation){ toast('Location not available on this device'); return; }
+  navigator.geolocation.getCurrentPosition(pos=>{
+    userPos = [pos.coords.latitude, pos.coords.longitude];
+    if(userMarker) map.removeLayer(userMarker);
+    userMarker = L.circleMarker(userPos, {radius:9,color:'#fff',weight:3,fillColor:'#0E6E73',fillOpacity:1}).addTo(map);
+    if(fly) map.setView(userPos, 15);
+    renderList();
+  }, ()=> toast('Could not get your location — check permissions'), {enableHighAccuracy:true, timeout:8000});
+}
+
+/* ================= Add flow ================= */
+function buildStarRow(container, onSet){
+  container.innerHTML='';
+  for(let i=1;i<=5;i++){
+    const s=document.createElement('span');
+    s.className='star'; s.textContent='★'; s.setAttribute('role','radio'); s.tabIndex=0;
+    s.setAttribute('aria-label', i+' star'+(i>1?'s':''));
+    const set=()=>{ onSet(i); [...container.children].forEach((c,j)=>c.classList.toggle('on', j<i)); };
+    s.onclick=set;
+    s.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();set();} };
+    container.appendChild(s);
+  }
+}
+function openAddModal(){
+  addStarsVal=0;
+  $('rName').value=''; $('rNote').value='';
+  buildStarRow($('addStars'), v=>addStarsVal=v);
+  $('addChips').innerHTML = FEATURES.map(f=>`<span class="chip" data-f="${f}">${f}</span>`).join('');
+  [...$('addChips').children].forEach(c=>c.onclick=()=>c.classList.toggle('on'));
+  $('addOverlay').classList.add('open');
+  setTimeout(()=>$('rName').focus(),100);
+}
+$('addBtn').onclick=()=>{
+  dropMode=true;
+  $('dropBanner').classList.add('show');
+};
+$('cancelDrop').onclick=()=>{ dropMode=false; $('dropBanner').classList.remove('show'); };
+$('closeAdd').onclick=()=>$('addOverlay').classList.remove('open');
+$('saveRestroom').onclick=async ()=>{
+  const name=$('rName').value.trim();
+  if(!name){ toast('Give it a name so people can find it'); return; }
+  if(!addStarsVal){ toast('Tap the stars to rate cleanliness'); return; }
+  if(!pendingLatLng){ toast('No location set — tap ＋ then tap the map'); return; }
+  const tags=[...$('addChips').querySelectorAll('.chip.on')].map(c=>c.dataset.f);
+  const note=$('rNote').value.trim();
+  restrooms.push({
+    id:'r'+Date.now()+Math.random().toString(36).slice(2,6),
+    name, lat:pendingLatLng.lat, lng:pendingLatLng.lng, tags,
+    verified:true, source:'user', createdAt:Date.now(),
+    reviews:[{stars:addStarsVal, note, ts:Date.now()}],
+    reports:[]
+  });
+  pendingLatLng=null;
+  await saveRestrooms();
+  $('addOverlay').classList.remove('open');
+  renderAll();
+  toast('Posted — thanks for helping the community! ✦');
+};
+
+/* ================= Detail + rating ================= */
+let detailStars=0;
+function openDetail(id){
+  const r=restrooms.find(x=>x.id===id); if(!r) return;
+  const a=avg(r);
+  const reviews=[...r.reviews].sort((x,y)=>y.ts-x.ts).map(v=>`
+    <div class="review">
+      <div class="r-top"><span class="stars-inline">${starsStr(v.stars)}</span><span>${timeAgo(v.ts)}</span></div>
+      ${v.note?`<p>${esc(v.note)}</p>`:''}
+    </div>`).join('');
+  const subBits=[
+    r.verified?scoreWord(a):'Unverified',
+    `${r.reviews.length} rating${r.reviews.length===1?'':'s'}`,
+    freshnessLabel(r),
+    distLabel(r)?distLabel(r)+' away':''
+  ].filter(Boolean).join(' · ');
+  const extraTags =
+    (!r.verified?'<span class="tag unverified">Be the first to confirm ✔</span>':'') +
+    (needsFreshCheck(r)&&r.reviews.length?'<span class="tag warn">Needs a fresh check</span>':'');
+  $('detailModal').innerHTML=`
+    <div class="detail-head">
+      <div>
+        <h2>${esc(r.name)}</h2>
+        <p class="sub">${subBits}</p>
+        ${(r.tags.length||extraTags)?`<div class="tags">${extraTags}${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>`:''}
+      </div>
+      <div class="big-score" style="background:${r.verified?scoreColor(a):'var(--muted)'};color:${r.verified?scoreTextColor(a):'#fff'}">
+        <span class="n">✦ ${a?a.toFixed(1):'—'}</span><span class="s">/ 5.0</span>
+      </div>
+    </div>
+    <button class="btn nav" onclick="navigateTo(${r.lat},${r.lng})">🧭 Navigate there</button>
+    <label>Rate the condition now${r.verified?'':' — your rating verifies this listing'}</label>
+    <div class="star-row" id="detailStars"></div>
+    <textarea id="detailNote" placeholder="How is it right now? (optional)" maxlength="200" style="margin-top:8px"></textarea>
+    <button class="btn primary" id="submitRating">Submit rating</button>
+    <label style="margin-top:16px">Recent reports</label>
+    <div class="reviews">${reviews || '<p class="sub">No reports yet.</p>'}</div>
+    <button class="btn ghost" id="reportBtn">⚑ Report listing</button>
+    <div class="chip-row" id="reportReasons" style="display:none;margin-top:10px"></div>
+    ${ADMIN?`<button class="btn ghost" id="adminRename" style="color:var(--deep-aqua)">✎ Edit name (admin)</button>
+    <button class="btn ghost" id="adminDelete" style="color:var(--danger);border-color:var(--danger)">🗑 Delete listing (admin)</button>`:''}
+    <button class="btn ghost" onclick="closeDetail()">Close</button>`;
+  detailStars=0;
+  buildStarRow($('detailStars'), v=>detailStars=v);
+  $('submitRating').onclick=async ()=>{
+    if(!detailStars){ toast('Tap the stars first'); return; }
+    r.reviews.push({stars:detailStars, note:$('detailNote').value.trim(), ts:Date.now()});
+    const flipped = !r.verified;
+    r.verified = true; // a community rating verifies an imported listing (PRD §4.5)
+    await saveRestrooms();
+    renderAll();
+    openDetail(id);
+    toast(flipped ? 'Rating posted — listing verified ✔' : 'Rating posted ✦');
+  };
+  $('reportBtn').onclick=()=>{
+    const row=$('reportReasons');
+    if(row.style.display!=='none'){ row.style.display='none'; return; }
+    row.innerHTML=REPORT_REASONS.map((x,i)=>`<span class="chip" data-i="${i}">${x}</span>`).join('');
+    [...row.children].forEach(c=>c.onclick=async ()=>{
+      r.reports.push({reason:REPORT_REASONS[+c.dataset.i], ts:Date.now(), resolved:false});
+      await saveRestrooms();
+      row.style.display='none';
+      toast('Reported — thanks, we’ll take a look');
+    });
+    row.style.display='flex';
+  };
+  if(ADMIN){
+    $('adminRename').onclick=async ()=>{
+      const name=prompt('New name:', r.name);
+      if(name && name.trim()){ r.name=name.trim().slice(0,60); await saveRestrooms(); renderAll(); openDetail(id); }
+    };
+    $('adminDelete').onclick=async ()=>{
+      if(!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
+      restrooms=restrooms.filter(x=>x.id!==id);
+      await saveRestrooms();
+      renderAll();
+      closeDetail();
+      toast('Listing deleted');
+    };
+  }
+  $('detailOverlay').classList.add('open');
+}
+function closeDetail(){ $('detailOverlay').classList.remove('open'); }
+window.openDetail=openDetail; window.closeDetail=closeDetail;
+
+/* ================= Navigation deep link ================= */
+function navigateTo(lat,lng){
+  const isApple=/iPhone|iPad|Macintosh/i.test(navigator.userAgent);
+  const url = isApple
+    ? `https://maps.apple.com/?daddr=${lat},${lng}&dirflg=w`
+    : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`;
+  window.open(url,'_blank');
+}
+window.navigateTo=navigateTo;
+
+/* ================= Admin queue (PRD §4.7) ================= */
+function openAdmin(){
+  const flagged = restrooms.filter(r=>openReports(r).length);
+  $('adminModal').innerHTML=`
+    <h2>Reported listings</h2>
+    <p class="sub">${flagged.length?flagged.length+' listing'+(flagged.length===1?'':'s')+' with open reports.':'No open reports. 🎉'}</p>
+    <div class="reviews">${flagged.map(r=>`
+      <div class="review">
+        <div class="r-top"><span><b>${esc(r.name)}</b></span><span>${openReports(r).length} report${openReports(r).length===1?'':'s'}</span></div>
+        <p>${openReports(r).map(x=>esc(x.reason)+' · '+timeAgo(x.ts)).join('<br>')}</p>
+        <div class="chip-row" style="margin-top:8px">
+          <span class="chip" onclick="adminResolve('${r.id}')">✔ Resolve reports</span>
+          <span class="chip" onclick="adminDeleteListing('${r.id}')" style="color:var(--danger);border-color:var(--danger)">🗑 Delete listing</span>
+        </div>
+      </div>`).join('')}
+    </div>
+    <button class="btn ghost" onclick="document.getElementById('adminOverlay').classList.remove('open')">Close</button>`;
+  $('adminOverlay').classList.add('open');
+}
+async function adminResolve(id){
+  const r=restrooms.find(x=>x.id===id); if(!r) return;
+  r.reports.forEach(x=>x.resolved=true);
+  await saveRestrooms(); renderAll(); openAdmin();
+}
+async function adminDeleteListing(id){
+  const r=restrooms.find(x=>x.id===id); if(!r) return;
+  if(!confirm(`Delete "${r.name}"? This cannot be undone.`)) return;
+  restrooms=restrooms.filter(x=>x.id!==id);
+  await saveRestrooms(); renderAll(); openAdmin();
+}
+window.adminResolve=adminResolve; window.adminDeleteListing=adminDeleteListing;
+
+/* ================= Misc wiring ================= */
+$('locateBtn').onclick=()=>locateUser(true);
+$('refreshBtn').onclick=async ()=>{ await loadRestrooms(); toast('Refreshed'); };
+if(ADMIN){ $('adminBtn').style.display='block'; $('adminBtn').onclick=openAdmin; }
+[$('addOverlay'),$('detailOverlay'),$('adminOverlay')].forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
+
+/* ================= Boot ================= */
+initMap();
+loadRestrooms();
+locateUser(false);
+</script>
+</body>
+</html>
