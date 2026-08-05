@@ -21,7 +21,7 @@ js/config.js          ← paste your Supabase URL + anon key here
 supabase/schema.sql   Tables, Row Level Security, triggers, stats view
 vendor/               Pinned copies of Leaflet 1.9.4 + supabase-js 2.111.0
                       (no CDN dependency; only map tiles load remotely)
-manifest.webmanifest  PWA manifest ("Add to Home Screen")
+manifest.json         PWA manifest ("Add to Home Screen")
 SETUP.md              Step-by-step account setup + deploy walkthrough
 prototype.html        Original single-file prototype (reference only)
 ```
