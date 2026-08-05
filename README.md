@@ -1,6 +1,11 @@
+<img src="icons/icon-rounded-512.png" alt="nine2two icon — a toilet-paper roll forming a 9" width="96" align="left">
+
 # nine2two (922)
 
 **When it's almost an emergency.**
+
+<br clear="left">
+
 
 A mobile-first, community-powered restroom finder with a real shared backend
 (Supabase). MVP v1.0 per [`nine2two-PRD-v1.md`](nine2two-PRD-v1.md).
@@ -16,7 +21,7 @@ js/config.js          ← paste your Supabase URL + anon key here
 supabase/schema.sql   Tables, Row Level Security, triggers, stats view
 vendor/               Pinned copies of Leaflet 1.9.4 + supabase-js 2.111.0
                       (no CDN dependency; only map tiles load remotely)
-manifest.webmanifest  PWA manifest ("Add to Home Screen")
+manifest.json         PWA manifest ("Add to Home Screen")
 SETUP.md              Step-by-step account setup + deploy walkthrough
 prototype.html        Original single-file prototype (reference only)
 ```
