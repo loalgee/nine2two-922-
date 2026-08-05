@@ -1,6 +1,11 @@
+<img src="icons/icon-rounded-512.png" alt="nine2two icon — a toilet-paper roll forming a 9" width="96" align="left">
+
 # nine2two (922)
 
 **When it's almost an emergency.**
+
+<br clear="left">
+
 
 A mobile-first, community-powered restroom finder with a real shared backend
 (Supabase). MVP v1.0 per [`nine2two-PRD-v1.md`](nine2two-PRD-v1.md).
