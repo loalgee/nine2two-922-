@@ -163,6 +163,13 @@ textarea{resize:none;height:74px}
 }
 .drop-banner.show{display:flex}
 .drop-banner button{border:none;background:var(--ink);color:#fff;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;font-size:12px}
+.drop-banner button.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--ink)}
+
+/* ---------- Search results (add-restroom locate step) ---------- */
+.search-result{cursor:pointer}
+.search-result:active{background:#EEF4F5}
+.search-result .r-name{font-size:14.5px;font-weight:700}
+.search-result .r-addr{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.35}
 
 /* ---------- Attribution footer ---------- */
 .attribution{
