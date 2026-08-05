@@ -15,7 +15,8 @@ const ADMIN_MODE = new URLSearchParams(location.search).get('admin') === '1';
 let map, userPos = null, userMarker = null;
 let restrooms = [];   // rows from restrooms_with_stats
 let markers = {};
-let dropMode = false, pendingLatLng = null;
+let dropMode = false, pendingLatLng = null, pendingName = '';
+let adjustMarker = null;
 let addStarsVal = 0, detailStars = 0;
 let session = null, isAdmin = false;
 
@@ -92,10 +93,9 @@ function initMap(){
   }).addTo(map);
   map.on('click', e=>{
     if(!dropMode) return;
-    pendingLatLng = e.latlng;
     dropMode = false;
     $('dropBanner').classList.remove('show');
-    openAddModal();
+    startPinAdjust(e.latlng, '');
   });
 }
 function pinIcon(a, verified){
@@ -180,17 +180,114 @@ function buildStarRow(container, onSet){
 }
 function openAddModal(){
   addStarsVal=0;
-  $('rName').value=''; $('rNote').value='';
+  $('rName').value=pendingName; $('rNote').value='';
   buildStarRow($('addStars'), v=>addStarsVal=v);
   $('addChips').innerHTML = FEATURES.map(f=>`<span class="chip" data-f="${f}">${f}</span>`).join('');
   [...$('addChips').children].forEach(c=>c.onclick=()=>c.classList.toggle('on'));
   $('addOverlay').classList.add('open');
   setTimeout(()=>$('rName').focus(),100);
 }
-$('addBtn').onclick=()=>{
-  if(!requireBackend()) return;
+
+/* ---- Locate step: geocode search (OSM Nominatim) or manual pin ---- */
+/* Nominatim usage policy notes: browsers forbid scripts from setting the
+   User-Agent header, so the app is identified by the Referer the browser
+   sends automatically; requests are debounced AND throttled to stay under
+   the 1 request/second limit. */
+const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
+let searchTimer = null, searchAbort = null, lastSearchAt = 0;
+
+function openLocateModal(){
+  pendingName='';
+  $('searchInput').value='';
+  $('searchStatus').textContent='';
+  $('searchResults').innerHTML='';
+  $('locateOverlay').classList.add('open');
+  setTimeout(()=>$('searchInput').focus(),100);
+}
+function scheduleSearch(){
+  clearTimeout(searchTimer);
+  const q=$('searchInput').value.trim();
+  if(q.length<3){ $('searchResults').innerHTML=''; $('searchStatus').textContent=''; return; }
+  // debounce typing, then respect the 1 req/s policy
+  const wait = Math.max(600, 1100 - (Date.now() - lastSearchAt));
+  searchTimer=setTimeout(()=>runSearch(q), wait);
+}
+async function runSearch(q){
+  if(searchAbort) searchAbort.abort();
+  searchAbort = new AbortController();
+  lastSearchAt = Date.now();
+  $('searchStatus').textContent='Searching…';
+  try{
+    // viewbox biases results toward the current map view (Hollywood by default)
+    const bb = map.getBounds().toBBoxString();
+    const url = `${NOMINATIM}?format=jsonv2&limit=5&q=${encodeURIComponent(q)}&viewbox=${bb}&bounded=0`;
+    const resp = await fetch(url, { signal: searchAbort.signal, headers: { 'Accept': 'application/json' } });
+    if(!resp.ok) throw new Error('Nominatim '+resp.status);
+    const data = await resp.json();
+    renderSearchResults(data);
+  }catch(e){
+    if(e.name==='AbortError') return;
+    console.error(e);
+    $('searchStatus').textContent='Search failed — check your connection, or drop a pin manually.';
+  }
+}
+function renderSearchResults(data){
+  const box=$('searchResults');
+  if(!data.length){
+    $('searchStatus').textContent='No matches. Try a different spelling — or drop a pin manually below.';
+    box.innerHTML='';
+    return;
+  }
+  $('searchStatus').textContent='Pick the right one:';
+  box.innerHTML = data.map((d,i)=>{
+    const name = d.name || String(d.display_name).split(',')[0];
+    return `<div class="review search-result" data-i="${i}">
+      <div class="r-name">${esc(name)}</div>
+      <div class="r-addr">${esc(d.display_name)}</div>
+    </div>`;
+  }).join('');
+  [...box.children].forEach(el=>el.onclick=()=>{
+    const d = data[+el.dataset.i];
+    $('locateOverlay').classList.remove('open');
+    startPinAdjust({lat:+d.lat, lng:+d.lon}, d.name || String(d.display_name).split(',')[0]);
+  });
+}
+
+/* Both paths (search pick + manual map tap) converge here: a draggable
+   pin the user can nudge to the actual entrance before confirming. */
+function startPinAdjust(latlng, name){
+  pendingName = (name||'').slice(0,60);
+  if(adjustMarker) map.removeLayer(adjustMarker);
+  adjustMarker = L.marker(latlng, {draggable:true, autoPan:true}).addTo(map);
+  map.setView(latlng, Math.max(map.getZoom(), 17));
+  $('nudgeBanner').classList.add('show');
+}
+function endPinAdjust(){
+  if(adjustMarker){ map.removeLayer(adjustMarker); adjustMarker=null; }
+  $('nudgeBanner').classList.remove('show');
+}
+$('confirmPin').onclick=()=>{
+  if(!adjustMarker) return;
+  pendingLatLng = adjustMarker.getLatLng();
+  endPinAdjust();
+  openAddModal();
+};
+$('cancelPin').onclick=()=>{ endPinAdjust(); pendingName=''; };
+
+$('searchInput').addEventListener('input', scheduleSearch);
+$('searchInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); clearTimeout(searchTimer); runSearch($('searchInput').value.trim()); }
+});
+$('manualDrop').onclick=()=>{
+  $('locateOverlay').classList.remove('open');
   dropMode=true;
   $('dropBanner').classList.add('show');
+};
+$('closeLocate').onclick=()=>$('locateOverlay').classList.remove('open');
+
+$('addBtn').onclick=()=>{
+  if(!requireBackend()) return;
+  openLocateModal();
 };
 $('cancelDrop').onclick=()=>{ dropMode=false; $('dropBanner').classList.remove('show'); };
 $('closeAdd').onclick=()=>$('addOverlay').classList.remove('open');
@@ -448,7 +545,7 @@ async function seedFromRefuge(){
 /* ================= Misc wiring ================= */
 $('locateBtn').onclick=()=>locateUser(true);
 $('refreshBtn').onclick=async ()=>{ await loadRestrooms(); toast('Refreshed'); };
-[$('addOverlay'),$('detailOverlay'),$('adminOverlay')].forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
+[$('addOverlay'),$('detailOverlay'),$('adminOverlay'),$('locateOverlay')].forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
 /* ================= Boot ================= */
 initMap();

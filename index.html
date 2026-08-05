@@ -61,6 +61,12 @@
     <button id="cancelDrop">Cancel</button>
   </div>
 
+  <div class="drop-banner" id="nudgeBanner">
+    🎯 Drag the pin to the exact spot
+    <button id="confirmPin">Confirm</button>
+    <button id="cancelPin" class="ghost">Cancel</button>
+  </div>
+
   <div class="fab-stack">
     <button class="fab locate" id="locateBtn" aria-label="Find my location" title="My location">◎</button>
     <button class="fab add" id="addBtn" aria-label="Add a restroom" title="Add restroom">＋</button>
@@ -72,6 +78,20 @@
   <div class="sheet-title" id="listTitle">Nearby restrooms</div>
   <div class="list" id="list">
     <div class="empty">Loading restrooms…</div>
+  </div>
+</div>
+
+<!-- Locate step: search or manual pin -->
+<div class="overlay" id="locateOverlay">
+  <div class="modal">
+    <h2>Add a restroom</h2>
+    <p class="sub">Search for the business or address — or drop a pin on the map yourself.</p>
+    <label for="searchInput">Business name or street address</label>
+    <input type="text" id="searchInput" placeholder="e.g. Amoeba Music, or 6212 Sunset Blvd" autocomplete="off" enterkeyhint="search">
+    <p class="sub" id="searchStatus" style="margin:8px 0 0"></p>
+    <div class="reviews" id="searchResults"></div>
+    <button class="btn ghost" id="manualDrop">📍 Can't find it? Drop a pin manually</button>
+    <button class="btn ghost" id="closeLocate">Cancel</button>
   </div>
 </div>
 
