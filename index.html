@@ -75,7 +75,19 @@
 
 <div class="sheet">
   <div class="sheet-handle"></div>
-  <div class="sheet-title" id="listTitle">Nearby restrooms</div>
+  <div class="sheet-title-row">
+    <div class="sheet-title" id="listTitle">All restrooms</div>
+    <select class="radius-select" id="radiusSelect" aria-label="Distance filter" style="display:none">
+      <option value="0.5">Within 0.5 mi</option>
+      <option value="1" selected>Within 1 mi</option>
+      <option value="3">Within 3 mi</option>
+      <option value="Infinity">Show all</option>
+    </select>
+  </div>
+  <div class="locate-prompt" id="locatePrompt">
+    <span>📍 Enable location for restrooms near you</span>
+    <button id="useLocationBtn">Use my location</button>
+  </div>
   <div class="list" id="list">
     <div class="empty">Loading restrooms…</div>
   </div>

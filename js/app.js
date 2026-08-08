@@ -28,15 +28,23 @@ function scoreTextColor(a){ return (a>=2.5 && a<4) ? 'var(--ink)' : '#fff'; }
 function scoreWord(a){ return a>=4.5?'Sparkling':a>=4?'Clean':a>=3?'Decent':a>=2?'Rough':a>0?'Avoid':'Unrated'; }
 function starsStr(n){ return '★'.repeat(Math.round(n)) + '☆'.repeat(5-Math.round(n)); }
 function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
-function distKm(a,b){
-  const R=6371, dLat=(b[0]-a[0])*Math.PI/180, dLng=(b[1]-a[1])*Math.PI/180;
+function distMi(a,b){
+  // Haversine great-circle distance in miles (R = Earth's mean radius in miles).
+  // Not a flat lat/lng approximation — accurate over any real-world distance.
+  const R=3958.8, dLat=(b[0]-a[0])*Math.PI/180, dLng=(b[1]-a[1])*Math.PI/180;
   const h=Math.sin(dLat/2)**2 + Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLng/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 }
 function distLabel(r){
   if(!userPos) return '';
-  const km = distKm(userPos,[r.lat,r.lng]);
-  return km<1 ? Math.round(km*1000)+' m' : km.toFixed(1)+' km';
+  const mi = distMi(userPos,[r.lat,r.lng]);
+  return mi<0.1 ? Math.round(mi*5280)+' ft' : mi.toFixed(1)+' mi';
+}
+function radiusFilter(){ return parseFloat($('radiusSelect').value); } // may be Infinity
+function filteredRestrooms(){
+  if(!userPos) return restrooms;
+  const r = radiusFilter();
+  return isFinite(r) ? restrooms.filter(x=> distMi(userPos,[x.lat,x.lng]) <= r) : restrooms;
 }
 function timeAgo(ts){
   const m=Math.floor((Date.now()-ts)/60000);
@@ -114,7 +122,7 @@ function pinIcon(a, verified){
 function renderMarkers(){
   Object.values(markers).forEach(m=>map.removeLayer(m));
   markers = {};
-  restrooms.forEach(r=>{
+  filteredRestrooms().forEach(r=>{
     const m = L.marker([r.lat,r.lng], {icon: pinIcon(r.avg_stars, r.verified)}).addTo(map);
     m.on('click', ()=>openDetail(r.id));
     markers[r.id] = m;
@@ -130,11 +138,19 @@ function renderList(){
       : `<div class="empty">Connect Supabase to load the shared map.<br><b>See SETUP.md for the walkthrough.</b></div>`;
     return;
   }
-  const sorted = [...restrooms].sort((a,b)=>{
-    if(userPos) return distKm(userPos,[a.lat,a.lng]) - distKm(userPos,[b.lat,b.lng]);
+  const visible = filteredRestrooms();
+  const sorted = [...visible].sort((a,b)=>{
+    if(userPos) return distMi(userPos,[a.lat,a.lng]) - distMi(userPos,[b.lat,b.lng]);
     return b.avg_stars - a.avg_stars;
   });
   $('listTitle').textContent = userPos ? 'Nearby restrooms' : 'All restrooms';
+  if(userPos && !sorted.length){
+    const radiusText = $('radiusSelect').selectedOptions[0].textContent.toLowerCase();
+    list.innerHTML = `<div class="empty">No restrooms ${radiusText}.<br>
+      <button class="btn ghost" id="expandRadiusBtn" style="margin-top:10px;width:auto;padding:9px 18px">Show all restrooms</button></div>`;
+    $('expandRadiusBtn').onclick=()=>{ $('radiusSelect').value='Infinity'; renderAll(); };
+    return;
+  }
   list.innerHTML = sorted.map(r=>{
     const a = r.avg_stars;
     const extraTags =
@@ -153,16 +169,39 @@ function renderList(){
 }
 function renderAll(){ renderMarkers(); renderList(); }
 
-/* ================= Geolocation ================= */
-function locateUser(fly=true){
+/* ================= Geolocation (PRD §4.1, always user-initiated — never on load) ================= */
+function youAreHereIcon(){
+  // Deliberately distinct from the teardrop restroom pins: a plain dot with a soft halo.
+  return L.divIcon({
+    className:'',
+    html:`<div style="width:20px;height:20px;border-radius:50%;background:var(--deep-aqua);
+      border:3px solid #fff;box-shadow:0 0 0 5px rgba(14,110,115,.28),0 2px 6px rgba(0,0,0,.3);"></div>`,
+    iconSize:[20,20], iconAnchor:[10,10]
+  });
+}
+function updateLocationUI(){
+  const has = !!userPos;
+  $('locatePrompt').style.display = has ? 'none' : 'flex';
+  $('radiusSelect').style.display = has ? 'inline-block' : 'none';
+  $('listTitle').textContent = has ? 'Nearby restrooms' : 'All restrooms';
+}
+function locateUser(){
   if(!navigator.geolocation){ toast('Location not available on this device'); return; }
   navigator.geolocation.getCurrentPosition(pos=>{
     userPos = [pos.coords.latitude, pos.coords.longitude];
     if(userMarker) map.removeLayer(userMarker);
-    userMarker = L.circleMarker(userPos, {radius:9,color:'#fff',weight:3,fillColor:'#0E6E73',fillOpacity:1}).addTo(map);
-    if(fly) map.setView(userPos, 15);
-    renderList();
-  }, ()=> toast('Could not get your location — check permissions'), {enableHighAccuracy:true, timeout:8000});
+    userMarker = L.marker(userPos, {icon: youAreHereIcon(), zIndexOffset: 1000, keyboard:false})
+      .bindTooltip('You are here', {direction:'top', offset:[0,-8]})
+      .addTo(map);
+    map.setView(userPos, 15);
+    updateLocationUI();
+    renderAll();
+  }, err=>{
+    // Graceful fallback: stay on the Hollywood default view, just tell the user why.
+    const denied = err.code === err.PERMISSION_DENIED;
+    toast(denied ? 'Location permission denied' : 'Could not get your location — check permissions');
+    updateLocationUI();
+  }, {enableHighAccuracy:true, timeout:8000});
 }
 
 /* ================= Add flow (PRD §4.3) ================= */
@@ -543,12 +582,15 @@ async function seedFromRefuge(){
 }
 
 /* ================= Misc wiring ================= */
-$('locateBtn').onclick=()=>locateUser(true);
+$('locateBtn').onclick=()=>locateUser();
+$('useLocationBtn').onclick=()=>locateUser();
+$('radiusSelect').onchange=renderAll;
 $('refreshBtn').onclick=async ()=>{ await loadRestrooms(); toast('Refreshed'); };
 [$('addOverlay'),$('detailOverlay'),$('adminOverlay'),$('locateOverlay')].forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
 /* ================= Boot ================= */
 initMap();
+updateLocationUI(); // shows the "enable location" prompt by default — no silent auto-request
 if(!CONFIGURED) $('setupBanner').classList.add('show');
 if(ADMIN_MODE){
   $('adminBtn').style.display='block';
@@ -558,4 +600,3 @@ if(ADMIN_MODE){
   refreshAdminState();
 }
 loadRestrooms();
-locateUser(false);
